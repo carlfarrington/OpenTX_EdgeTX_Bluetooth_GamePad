@@ -34,12 +34,12 @@ https://github.com/h2zero/NimBLE-Arduino
 #include "sbus.h"
 #include <FastLED.h>
 
-#define RX_PIN 20
-#define TX_PIN 21
-#define LED_PIN 7
+#define RX_PIN 44
+#define TX_PIN 43
+#define LED_PIN 48
 
 boolean debug_console = false;
-
+boolean led_enabled = true;
 
 ////////////////////////////////////////////////////////////////////////////////
 //LEd object
@@ -52,9 +52,9 @@ BleGamepadConfiguration bleGamepadConfig;
 
 ////////////////////////////////////////////////////////////////////////////////
 //Serial and SBUS parameters
-bfs::SbusRx sbus_rx(&Serial1);
-std::array<int16_t, bfs::SbusRx::NUM_CH()> sbus_data_in;
-std::array<int16_t, bfs::SbusRx::NUM_CH()> sbus_data_out;
+bfs::SbusRx sbus_rx(&Serial0, RX_PIN, TX_PIN, true);
+bfs::SbusData sbus_data_in;
+bfs::SbusData sbus_data_out;
 
 int channel_max = 16;
 int16_t channel_min_val = 172;
@@ -66,75 +66,70 @@ int button_count = 4;
 
 //default channel map EdgeTX AETR -just for debugging purposes
 //ROLL = AIL | PITCH = ELE | THR = THR | YAW = RUD
-String channel_names[] = { " ROLL ", " PITCH ", " TROTTLE ", " YAW "};
+String channel_names[] = { " ROLL ", " PITCH ", " TROTTLE ", " YAW " };
 
 //functions
 void LED_blink(int, String, int);
 void LED_single_color(String);
 void LED_pulse(String);
 
-void setup()
-{
+void setup() {
 
-    delay(1000);
+  delay(1000);
 
-    //LED init
-    FastLED.addLeds<NEOPIXEL, LED_PIN>(leds, 1);
-    LED_single_color("green");
-    delay(1500);
+  //LED init
+  if (led_enabled) {
+    FastLED.addLeds<NEOPIXEL, LED_PIN>(leds, 1);  
+  }
+  LED_single_color("green");
+  delay(1500);
 
-    //Serial init
-    Serial.begin(115200);
-    LED_blink(1, "green", 100);
-    delay(1000);
+  //Serial init
+  Serial.begin(115200);
+  LED_blink(1, "green", 100);
+  delay(1000);
 
-    //SBUS init
-    sbus_rx.Begin(RX_PIN,TX_PIN);
-    Serial.println("starting SBUS");
-    LED_blink(1, "green", 100);
-    delay(1000);
+  //SBUS init
+  sbus_rx.Begin();
+  Serial.println("starting SBUS");
+  LED_blink(1, "green", 100);
+  delay(1000);
 
-    //BLE init
-    Serial.println("starting BLE");
-    bleGamepadConfig.setButtonCount(button_count);
-    bleGamepadConfig.setAutoReport(false);
-    Serial.println("BLE config done");
-    bleGamepad.begin(&bleGamepadConfig);
-    Serial.println("BLE init done");
-    LED_blink(1, "green", 100);
-    delay(1000);
+  //BLE init
+  Serial.println("starting BLE");
+  bleGamepadConfig.setButtonCount(button_count);
+  bleGamepadConfig.setAutoReport(false);
+  Serial.println("BLE config done");
+  bleGamepad.begin(&bleGamepadConfig);
+  Serial.println("BLE init done");
+  LED_blink(1, "green", 100);
+  delay(1000);
 
 
-    LED_blink(10, "green", 50);
-    delay(2000);
+  LED_blink(10, "green", 50);
+  delay(2000);
 }
 
-void loop()
-{
+void loop() {
 
+  if (sbus_rx.Read()) {
+    sbus_data_in = sbus_rx.data();
 
+    lostframe = sbus_data_in.lost_frame;
+    // failsafe = sbus_rx.failsafe();
 
-    if (sbus_rx.Read())
-    {
-        sbus_data_in = sbus_rx.ch();
+    ////////////////////////////////////////////////////////////////////////
+    //send data
+    //default channel map EdgeTX AETR
+    //ROLL = AIL | PITCH = ELE | THR = THR | YAW = RUD
+    ////////////////////////////////////////////////////////////////////////
+    if (bleGamepad.isConnected() == true && lostframe == false) {
+      for (int i = 0; i < channel_max; i++) {
+        sbus_data_out.ch[i] = map(sbus_data_in.ch[i], channel_min_val, channel_max_val, 0, 32767);
+      }
 
-        lostframe = sbus_rx.lost_frame();
-        failsafe = sbus_rx.failsafe();
-
-        ////////////////////////////////////////////////////////////////////////
-        //send data
-        //default channel map EdgeTX AETR
-        //ROLL = AIL | PITCH = ELE | THR = THR | YAW = RUD
-        ////////////////////////////////////////////////////////////////////////
-        if (bleGamepad.isConnected() == true && lostframe == false)
-        {
-          for(int i=0;i < channel_max; i++)
-          {
-              sbus_data_out[i] = map(sbus_data_in[i], channel_min_val, channel_max_val, 0, 32767);
-          }
-
-          //workaround for parsing errors. channel 13-16 are not configured in the radio but sometimes all channels are set to strange random numbers:
-          /*check output of channel 13-16 below
+      //workaround for parsing errors. channel 13-16 are not configured in the radio but sometimes all channels are set to strange random numbers:
+      /*check output of channel 13-16 below
           CH1: ROLL 993 | CH2: PITCH 324 | CH3: TROTTLE 717 | CH4: YAW 1811 | CH5:AUX1 173 | CH6:AUX2 173 | CH7:AUX3 173 | CH8:AUX4 173 | CH9:AUX5 173 | CH10:AUX6 173 | CH11:AUX7 175 | CH12:AUX8 173 | CH13:AUX9 992 | CH14:AUX10 992 | CH15:AUX11 992 | CH16:AUX12 992 |  lost frames: 0
           CH1: ROLL 993 | CH2: PITCH 324 | CH3: TROTTLE 717 | CH4: YAW 1811 | CH5:AUX1 173 | CH6:AUX2 173 | CH7:AUX3 173 | CH8:AUX4 173 | CH9:AUX5 173 | CH10:AUX6 173 | CH11:AUX7 175 | CH12:AUX8 173 | CH13:AUX9 992 | CH14:AUX10 992 | CH15:AUX11 992 | CH16:AUX12 992 |  lost frames: 0
           CH1: ROLL 993 | CH2: PITCH 324 | CH3: TROTTLE 717 | CH4: YAW 1811 | CH5:AUX1 173 | CH6:AUX2 173 | CH7:AUX3 173 | CH8:AUX4 173 | CH9:AUX5 173 | CH10:AUX6 173 | CH11:AUX7 175 | CH12:AUX8 173 | CH13:AUX9 992 | CH14:AUX10 992 | CH15:AUX11 992 | CH16:AUX12 992 |  lost frames: 0
@@ -146,82 +141,90 @@ void loop()
           CH1: ROLL 1299 | CH2: PITCH 766 | CH3: TROTTLE 1034 | CH4: YAW 1752 | CH5:AUX1 173 | CH6:AUX2 173 | CH7:AUX3 173 | CH8:AUX4 173 | CH9:AUX5 173 | CH10:AUX6 173 | CH11:AUX7 175 | CH12:AUX8 173 | CH13:AUX9 992 | CH14:AUX10 992 | CH15:AUX11 992 | CH16:AUX12 992 |  lost frames: 0
           */
 
-          if(sbus_data_in[14] > 890 && sbus_data_in[14] < 1000 && sbus_data_in[15] > 890 && sbus_data_in[15] < 1000)
-          {
-            // bleGamepad.setAxes sets all axes at once. There are a few:
-            // (x axis, y axis, z axis, rx axis, ry axis, rz axis, slider 1, slider 2)
-            bleGamepad.setAxes(sbus_data_out[3],sbus_data_out[2],sbus_data_out[4],sbus_data_out[5],sbus_data_out[0],sbus_data_out[1],sbus_data_out[10],sbus_data_out[11]);
+      if (sbus_data_in.ch[14] > 890 && sbus_data_in.ch[14] < 1000 && sbus_data_in.ch[15] > 890 && sbus_data_in.ch[15] < 1000) {
+        // bleGamepad.setAxes sets all axes at once. There are a few:
+        // (x axis, y axis, z axis, rx axis, ry axis, rz axis, slider 1, slider 2)
+        bleGamepad.setAxes(sbus_data_out.ch[3], sbus_data_out.ch[2], sbus_data_out.ch[4], sbus_data_out.ch[5], sbus_data_out.ch[0], sbus_data_out.ch[1], sbus_data_out.ch[10], sbus_data_out.ch[11]);
 
-            if(sbus_data_out[8] > 1000){bleGamepad.press(BUTTON_1);}else{bleGamepad.release(BUTTON_1);}
-            if(sbus_data_out[9] > 1000){bleGamepad.press(BUTTON_2);}else{bleGamepad.release(BUTTON_2);}
-            if(sbus_data_out[6] > 1000){bleGamepad.press(BUTTON_3);}else{bleGamepad.release(BUTTON_3);}
-            if(sbus_data_out[7] > 1000){bleGamepad.press(BUTTON_4);}else{bleGamepad.release(BUTTON_4);}
-
-            bleGamepad.sendReport();
-          }
-
+        if (sbus_data_out.ch[8] > 1000) {
+          bleGamepad.press(BUTTON_1);
+        } else {
+          bleGamepad.release(BUTTON_1);
+        }
+        if (sbus_data_out.ch[9] > 1000) {
+          bleGamepad.press(BUTTON_2);
+        } else {
+          bleGamepad.release(BUTTON_2);
+        }
+        if (sbus_data_out.ch[6] > 1000) {
+          bleGamepad.press(BUTTON_3);
+        } else {
+          bleGamepad.release(BUTTON_3);
+        }
+        if (sbus_data_out.ch[7] > 1000) {
+          bleGamepad.press(BUTTON_4);
+        } else {
+          bleGamepad.release(BUTTON_4);
         }
 
-        ////////////////////////////////////////////////////////////////////////
-        //print channel output if debug is enabled
-        ////////////////////////////////////////////////////////////////////////
+        bleGamepad.sendReport();
+      }
+    }
 
-        if(debug_console)
-        {
-          for(int i=0;i < channel_max; i++)
-          {
-            Serial.print("CH"); Serial.print(i+1); Serial.print(":");
-            if(i<=3) {Serial.print(channel_names[i]);}
-            else { Serial.print("AUX"); Serial.print(i - 3); Serial.print(" "); }
-            Serial.print(sbus_data_in[i]);
-            Serial.print(" | ");
-          }
+    ////////////////////////////////////////////////////////////////////////
+    //print channel output if debug is enabled
+    ////////////////////////////////////////////////////////////////////////
 
-          Serial.print(" lost frames: ");
-          Serial.println(sbus_rx.lost_frame());
+    if (debug_console) {
+      for (int i = 0; i < channel_max; i++) {
+        Serial.print("CH");
+        Serial.print(i + 1);
+        Serial.print(":");
+        if (i <= 3) {
+          Serial.print(channel_names[i]);
+        } else {
+          Serial.print("AUX");
+          Serial.print(i - 3);
+          Serial.print(" ");
         }
-
-
+        Serial.print(sbus_data_in.ch[i]);
+        Serial.print(" | ");
       }
-
-    if (bleGamepad.isConnected())
-    {
-      //do only only once
-      if(isconnected == false)
-      {
-         LED_blink(5, "blue", 250);
-         isconnected = true;
-         if(debug_console)
-         {
-          Serial.println("BLE is now connected");
-         }
-         LED_single_color("blue");
-      }
-
+      Serial.println();
     }
-    else
-    {
-      if(debug_console)
-      {
-        Serial.println("BLE is NOT connected");
+  }
+
+  if (bleGamepad.isConnected()) {
+    //do only only once
+    if (isconnected == false) {
+      LED_blink(5, "blue", 250);
+      isconnected = true;
+      if (debug_console) {
+        Serial.println("BLE is now connected");
       }
-      LED_pulse("blue");
-      //LED_blink(1, "blue", 500);
-      isconnected = false;
+      LED_single_color("blue");
     }
 
-}//end main
+  } else {
+    if (debug_console) {
+      Serial.println("BLE is NOT connected");
+    }
+    LED_pulse("blue");
+    LED_blink(1, "blue", 500);
+    isconnected = false;
+  }
 
-void LED_blink(int cnt, String color, int delay_ms)
-{
+}  //end main
+
+void LED_blink(int cnt, String color, int delay_ms) {
+  if (!led_enabled) return;
   FastLED.setBrightness(255);
 
-  for(int i=0;i<cnt;i++)
-  {
+  for (int i = 0; i < cnt; i++) {
 
-    if(color == "red") {leds[0] = CRGB::Red;}
-    if(color == "green") {leds[0] = CRGB::Green;}
-    if(color == "blue") {leds[0] = CRGB::Blue;}
+    if (color == "red") { leds[0] = CRGB::Red; }
+    if (color == "green") { leds[0] = CRGB::Green; }
+    if (color == "blue") { leds[0] = CRGB::Blue; }
 
     FastLED.show();
     delay(delay_ms);
@@ -232,32 +235,30 @@ void LED_blink(int cnt, String color, int delay_ms)
   }
 }
 
-void LED_single_color(String color)
-{
-    FastLED.setBrightness(255);
+void LED_single_color(String color) {
+  if (!led_enabled) return;
+  FastLED.setBrightness(255);
 
-    if(color == "red") {leds[0] = CRGB::Red;}
-    if(color == "green") {leds[0] = CRGB::Green;}
-    if(color == "blue") {leds[0] = CRGB::Blue;}
-    FastLED.show();
+  if (color == "red") { leds[0] = CRGB::Red; }
+  if (color == "green") { leds[0] = CRGB::Green; }
+  if (color == "blue") { leds[0] = CRGB::Blue; }
+  FastLED.show();
 }
 
-void LED_pulse(String color)
-{
-  for(int i=0;i<200;i++)
-  {
-    if(color == "red") {leds[0] = CRGB::Red;}
-    if(color == "green") {leds[0] = CRGB::Green;}
-    if(color == "blue") {leds[0] = CRGB::Blue;}
+void LED_pulse(String color) {
+  if (!led_enabled) return;
+  for (int i = 0; i < 200; i++) {
+    if (color == "red") { leds[0] = CRGB::Red; }
+    if (color == "green") { leds[0] = CRGB::Green; }
+    if (color == "blue") { leds[0] = CRGB::Blue; }
     FastLED.setBrightness(i);
     FastLED.show();
     delay(5);
   }
-  for(int i=200;i>0;i--)
-  {
-    if(color == "red") {leds[0] = CRGB::Red;}
-    if(color == "green") {leds[0] = CRGB::Green;}
-    if(color == "blue") {leds[0] = CRGB::Blue;}
+  for (int i = 200; i > 0; i--) {
+    if (color == "red") { leds[0] = CRGB::Red; }
+    if (color == "green") { leds[0] = CRGB::Green; }
+    if (color == "blue") { leds[0] = CRGB::Blue; }
     FastLED.setBrightness(i);
     FastLED.show();
     delay(5);
