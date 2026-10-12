@@ -1,4 +1,8 @@
-# EdgeTX/OpenTX Bluetooth BLE Gamepad  v1.0
+# EdgeTX/OpenTX Bluetooth BLE Gamepad
+
+Updated to work with newer BFS SBus library.
+led_enabled boolean can be toggled.
+Pin defs etc are set for ESP32-C3 Super Mini
 
 Copyright (C) by mosch   
 License GPLv2: http://www.gnu.org/licenses/gpl-2.0.html       
